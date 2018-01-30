@@ -5,6 +5,8 @@ module FirstApp.Main
   , app
   ) where
 
+import           Data.Bifunctor                     (first)
+
 import           Control.Applicative                (liftA2)
 import           Control.Monad                      (join)
 
@@ -24,7 +26,7 @@ import           Data.Either                        (Either (Left, Right),
                                                      either)
 
 import           Data.Semigroup                     ((<>))
-import           Data.Text                          (Text)
+import           Data.Text                          (Text, unpack)
 import           Data.Text.Encoding                 (decodeUtf8)
 
 import           Data.Aeson                         (ToJSON)
@@ -32,10 +34,11 @@ import qualified Data.Aeson                         as A
 
 import           Database.SQLite.SimpleErrors.Types (SQLiteResponse)
 
-import           FirstApp.Conf                      (Conf, firstAppConfig)
+import           FirstApp.Conf                      (Conf (dbFilePath),
+                                                     firstAppConfig)
 import qualified FirstApp.DB                        as DB
 import           FirstApp.Types                     (ContentType (JSON, PlainText),
-                                                     Error (EmptyCommentText, EmptyTopic, UnknownRoute),
+                                                     Error (DBEmptyBody, DBEmptyTopic, DBError, EmptyCommentText, EmptyTopic, UnknownRoute),
                                                      RqType (AddRq, ListRq, ViewRq),
                                                      mkCommentText, mkTopic,
                                                      renderContentType)
@@ -48,7 +51,11 @@ data StartUpError
   deriving Show
 
 runApp :: IO ()
-runApp = error "runApp needs re-implementing"
+runApp = do
+  errOrDB <- prepareAppReqs
+  case errOrDB of
+    Left e   -> putStrLn $ "unable to start database" <> show e
+    Right db -> run 8080 $ app db
 
 -- We need to complete the following steps to prepare our app requirements:
 --
@@ -60,8 +67,10 @@ runApp = error "runApp needs re-implementing"
 --
 prepareAppReqs
   :: IO ( Either StartUpError DB.FirstAppDB )
-prepareAppReqs =
-  error "prepareAppReqs not implemented"
+prepareAppReqs = do
+  let fp = dbFilePath firstAppConfig
+  db <- DB.initDB fp
+  return $ first DbInitErr db
 
 -- | Some helper functions to make our lives a little more DRY.
 mkResponse
@@ -129,12 +138,15 @@ handleRequest
   :: DB.FirstAppDB
   -> RqType
   -> IO (Either Error Response)
-handleRequest _db (AddRq _ _) =
-  (resp200 PlainText "Success" <$) <$> error "AddRq handler not implemented"
-handleRequest _db (ViewRq _)  =
-  error "ViewRq handler not implemented"
-handleRequest _db ListRq      =
-  error "ListRq handler not implemented"
+handleRequest db (AddRq t c) = do
+  errOrUnit <- DB.addCommentToTopic db t c
+  return $ (resp200 PlainText "Success" <$) errOrUnit
+handleRequest db (ViewRq t)  = do
+  errOrComments <- DB.getComments db t
+  return (fmap resp200Json errOrComments)
+handleRequest db ListRq      = do
+  errOrTopics <- DB.getTopics db
+  return (fmap resp200Json errOrTopics)
 
 mkRequest
   :: Request
@@ -178,3 +190,9 @@ mkErrorResponse EmptyCommentText =
   resp400 PlainText "Empty Comment"
 mkErrorResponse EmptyTopic =
   resp400 PlainText "Empty Topic"
+mkErrorResponse DBEmptyTopic =
+  resp400 PlainText "Empty Topic in database"
+mkErrorResponse DBEmptyBody =
+  resp400 PlainText "Empty Body in database"
+mkErrorResponse (DBError e) =
+  resp400 PlainText ("Database error: " <> (LBS.pack . show) e)

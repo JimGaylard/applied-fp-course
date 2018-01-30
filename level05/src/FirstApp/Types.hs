@@ -23,6 +23,7 @@ module FirstApp.Types
   , fromDbComment
   ) where
 
+import           Control.Exception                  (IOException)
 import           GHC.Generics                       (Generic)
 import           GHC.Word                           (Word16)
 
@@ -31,14 +32,16 @@ import           Data.Text                          (Text)
 
 import           System.IO.Error                    (IOError)
 
-import           Data.Monoid                        (Last,
-                                                     Monoid (mappend, mempty))
+import           Data.Monoid                        (Last (Last),
+                                                     Monoid (mappend, mempty),
+                                                     (<>))
 
 import           Data.List                          (stripPrefix)
 import           Data.Maybe                         (fromMaybe)
 import           Data.Time                          (UTCTime)
 
-import           Data.Aeson                         (FromJSON (..), ToJSON)
+import           Data.Aeson                         (FromJSON (..), ToJSON,
+                                                     (.:?))
 import qualified Data.Aeson                         as A
 import qualified Data.Aeson.Types                   as A
 
@@ -191,7 +194,11 @@ newtype DBFilePath = DBFilePath
 -- The ``Conf`` type will need:
 -- - A customisable port number: ``Port``
 -- - A filepath for our SQLite database: ``DBFilePath``
-data Conf = Conf
+data Conf =
+   Conf
+    { confPort       :: Port
+    , confDBFilePath :: DBFilePath
+    }
 
 -- We're storing our Port as a Word16 to be more precise and prevent invalid
 -- values from being used in our application. However Wai is not so stringent.
@@ -200,12 +207,16 @@ data Conf = Conf
 confPortToWai
   :: Conf
   -> Int
-confPortToWai =
-  error "confPortToWai not implemented"
+confPortToWai (Conf p _) = fromIntegral $ getPort p
 
 -- Similar to when we were considering our application types, leave this empty
 -- for now and add to it as you go.
-data ConfigError = ConfigError
+data ConfigError =
+    ConfigError
+  | FileNotFoundError IOException
+  | JSONError String
+  | PortConfigMissing
+  | DBPathConfigMissing
   deriving Show
 
 -- Our application will be able to load configuration from both a file and
@@ -244,9 +255,9 @@ data PartialConf = PartialConf
 instance Monoid PartialConf where
   mempty = PartialConf mempty mempty
 
-  mappend _a _b = PartialConf
-    { pcPort       = error "pcPort mappend not implemented"
-    , pcDBFilePath = error "pcDBFilePath mappend not implemented"
+  mappend a b = PartialConf
+    { pcPort       = pcPort a <> pcPort b
+    , pcDBFilePath = pcDBFilePath a <> pcDBFilePath b
     }
 
 -- When it comes to reading the configuration options from the command-line, we
@@ -259,4 +270,6 @@ instance Monoid PartialConf where
 -- have to tell aeson how to go about converting the JSON into our PartialConf
 -- data structure.
 instance FromJSON PartialConf where
-  parseJSON = error "parseJSON for PartialConf not implemented yet."
+  parseJSON = A.withObject "PartialConfig" $ \p -> PartialConf
+    <$> (Last <$> (fmap . fmap) Port (p .:? "port"))
+    <*> (Last <$> (fmap . fmap) DBFilePath (p .:? "dbFileName"))

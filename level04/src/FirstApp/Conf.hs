@@ -4,7 +4,7 @@ module FirstApp.Conf
     , firstAppConfig
     ) where
 
-data Conf = Conf
+newtype Conf = Conf
   { dbFilePath :: FilePath
   }
 

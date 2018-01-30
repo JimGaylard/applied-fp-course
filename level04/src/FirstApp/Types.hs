@@ -14,23 +14,30 @@ module FirstApp.Types
   , getCommentText
   , renderContentType
   , fromDbComment
+  , fromDbTopic
   ) where
 
-import           GHC.Generics      (Generic)
+import           GHC.Generics                       (Generic)
 
-import           Data.ByteString   (ByteString)
-import           Data.Text         (Text)
+import           Data.ByteString                    (ByteString)
+import           Data.Char                          (toLower)
+import           Data.Text                          (Text)
 
-import           Data.List         (stripPrefix)
-import           Data.Maybe        (fromMaybe)
+import           Data.List                          (stripPrefix)
 
-import           Data.Aeson        (ToJSON (toJSON))
-import qualified Data.Aeson        as A
-import qualified Data.Aeson.Types  as A
+import           Data.Maybe                         (fromMaybe)
 
-import           Data.Time         (UTCTime)
+import           Data.Aeson                         (ToJSON (toJSON))
+import qualified Data.Aeson                         as A
+import qualified Data.Aeson.Types                   as A
 
-import           FirstApp.DB.Types (DBComment)
+import           Data.Time                          (UTCTime)
+
+import           Database.SQLite.SimpleErrors.Types (SQLiteResponse)
+
+import           FirstApp.DB.Types                  (DBComment, DBTopic, dbBody,
+                                                     dbId, dbTime, dbTopic,
+                                                     dbTopicId)
 
 newtype Topic = Topic Text
   deriving (Show, ToJSON)
@@ -69,8 +76,7 @@ data Comment = Comment
 modFieldLabel
   :: String
   -> String
-modFieldLabel =
-  error "modFieldLabel not implemented"
+modFieldLabel f = fromMaybe f $ (stripPrefix "comment". fmap toLower) f
 
 instance ToJSON Comment where
   -- This is one place where we can take advantage of our `Generic` instance.
@@ -95,8 +101,18 @@ instance ToJSON Comment where
 fromDbComment
   :: DBComment
   -> Either Error Comment
-fromDbComment =
-  error "fromDbComment not yet implemented"
+fromDbComment dbc =
+  Comment
+   <$> Right (CommentId $ dbId dbc)
+   <*> mkTopic (dbTopic dbc)
+   <*> mkCommentText (dbBody dbc)
+   <*> Right (dbTime dbc)
+
+fromDbTopic
+ :: DBTopic
+ -> Either Error Topic
+fromDbTopic dbt =
+  mkTopic (dbTopicId dbt)
 
 nonEmptyText
   :: (Text -> a)
@@ -139,6 +155,9 @@ data Error
   = UnknownRoute
   | EmptyCommentText
   | EmptyTopic
+  | DBEmptyTopic
+  | DBEmptyBody
+  | DBError SQLiteResponse
   -- We need another constructor for our DB error types.
   deriving Show
 

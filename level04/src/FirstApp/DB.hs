@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 module FirstApp.DB
   ( FirstAppDB (FirstAppDB)
@@ -10,19 +11,25 @@ module FirstApp.DB
   , deleteTopic
   ) where
 
-import           Data.Text                          (Text)
+import           Data.Bifunctor                     (first)
+import           Data.Text                          (Text, unpack)
 import qualified Data.Text                          as Text
 
 import           Data.Time                          (getCurrentTime)
 
-import           Database.SQLite.Simple             (Connection, Query (Query))
+import           Database.SQLite.Simple             (Connection, Query (Query),
+                                                     close, open)
 import qualified Database.SQLite.Simple             as Sql
 
 import qualified Database.SQLite.SimpleErrors       as Sql
 import           Database.SQLite.SimpleErrors.Types (SQLiteResponse)
 
 import           FirstApp.Types                     (Comment, CommentText,
-                                                     Error, Topic)
+                                                     Error (DBError), Topic,
+                                                     fromDbComment, fromDbTopic,
+                                                     getCommentText, getTopic)
+
+import           FirstApp.DB.Types                  (DBComment, DBTopic)
 
 -- ------------------------------------------------------------------------|
 -- You'll need the documentation for sqlite-simple ready for this section! |
@@ -32,14 +39,13 @@ import           FirstApp.Types                     (Comment, CommentText,
 -- our database queries. This also allows things to change over time without
 -- having to rewrite all of the functions that need to interact with DB related
 -- things in different ways.
-data FirstAppDB = FirstAppDB
+newtype FirstAppDB = FirstAppDB {conn :: Connection}
 
 -- Quick helper to pull the connection and close it down.
 closeDB
   :: FirstAppDB
   -> IO ()
-closeDB =
-  error "closeDb not implemented"
+closeDB db = close $ conn db
 
 -- Given a `FilePath` to our SQLite DB file, initialise the database and ensure
 -- our Table is there by running a query to create it, if it doesn't exist
@@ -47,8 +53,10 @@ closeDB =
 initDB
   :: FilePath
   -> IO ( Either SQLiteResponse FirstAppDB )
-initDB fp =
-  error "initDb not implemented"
+initDB fp = Sql.runDBAction $ do
+  c <- open fp
+  Sql.execute_ c createTableQ
+  return $ FirstAppDB c
   where
   -- Query has an `IsString` instance so string literals like this can be
   -- converted into a `Query` type when the `OverloadedStrings` language
@@ -69,43 +77,46 @@ getComments
   :: FirstAppDB
   -> Topic
   -> IO (Either Error [Comment])
-getComments =
+getComments db topic =
   let
-    sql = "SELECT id,topic,comment,time FROM comments WHERE topic = ?"
-  -- There are several possible implementations of this function. Paritcularly
-  -- there may be a trade-off between deciding to throw an Error if a DbComment
-  -- cannot be converted to a Comment, or simply ignoring any DbComment that is
-  -- not valid.
-  in
-    error "getComments not implemented"
+    sql = "SELECT id,topic,comment,time FROM comments WHERE topic = ?" in
+    do
+      dbComments <- Sql.runDBAction $ Sql.query (conn db) sql (Sql.Only $ getTopic topic)
+      return $ first DBError dbComments >>= traverse fromDbComment
+
 
 addCommentToTopic
   :: FirstAppDB
   -> Topic
   -> CommentText
   -> IO (Either Error ())
-addCommentToTopic =
+addCommentToTopic db topic comment =
   let
-    sql = "INSERT INTO comments (topic,comment,time) VALUES (?,?,?)"
-  in
-    error "addCommentToTopic not implemented"
-
+    sql = "INSERT INTO comments (topic,comment,time) VALUES (?,?,?)" in
+      do
+        time <- getCurrentTime
+        response <- Sql.runDBAction $ Sql.execute (conn db) sql
+         (getTopic topic, getCommentText comment, time)
+        return $ first DBError response
 
 getTopics
   :: FirstAppDB
   -> IO (Either Error [Topic])
-getTopics =
+getTopics db =
   let
-    sql = "SELECT DISTINCT topic FROM comments"
-  in
-    error "getTopics not implemented"
+    sql = "SELECT DISTINCT topic FROM comments" in
+    do
+      dbTopics <- Sql.runDBAction $ Sql.query_ (conn db) sql
+      return $ first DBError dbTopics >>= traverse fromDbTopic
 
 deleteTopic
   :: FirstAppDB
   -> Topic
   -> IO (Either Error ())
-deleteTopic =
+deleteTopic db topic =
   let
-    sql = "DELETE FROM comments WHERE topic = ?"
-  in
-    error "deleteTopic not implemented"
+    sql = "DELETE FROM comments WHERE topic = ?" in
+      do
+        response <- Sql.runDBAction $ Sql.execute (conn db) sql (Sql.Only $ getTopic topic)
+        return $ first DBError response
+

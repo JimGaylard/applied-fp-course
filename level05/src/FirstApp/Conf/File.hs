@@ -9,13 +9,13 @@ import           Data.Text                  (Text)
 import           Data.Bifunctor             (first)
 import           Data.Monoid                (Last (Last))
 
-import           Control.Exception          (try)
+import           Control.Exception          (IOException, try)
 
 import           Data.Aeson                 (FromJSON, Object)
 
 import qualified Data.Aeson                 as Aeson
 
-import           FirstApp.Types             (ConfigError,
+import           FirstApp.Types             (ConfigError (FileNotFoundError, JSONError),
                                              PartialConf (PartialConf))
 -- Doctest setup section
 -- $setup
@@ -33,20 +33,23 @@ import           FirstApp.Types             (ConfigError,
 --
 -- | readConfFile
 -- >>> readConfFile "badFileName.no"
--- Left (undefined "badFileName.no: openBinaryFile: does not exist (No such file or directory)")
+-- Left (FileNotFoundError badFileName.no: openBinaryFile: does not exist (No such file or directory))
 -- >>> readConfFile "test.json"
 -- Right "{\n  \"foo\": 33\n}\n"
 --
 readConfFile
   :: FilePath
   -> IO ( Either ConfigError ByteString )
-readConfFile =
-  error "readConfFile not implemented"
+readConfFile fp = do
+  errOrLBS <- try $LBS.readFile fp
+  return $ first FileNotFoundError errOrLBS
 
 -- Construct the function that will take a ``FilePath``, read it in, decode it,
 -- and construct our ``PartialConf``.
 parseJSONConfigFile
   :: FilePath
   -> IO ( Either ConfigError PartialConf )
-parseJSONConfigFile =
-  error "parseJSONConfigFile not implemented"
+parseJSONConfigFile fp = do
+  lbs <- readConfFile fp
+  return $ lbs >>= first JSONError . Aeson.eitherDecode
+

@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 module FirstApp.Main
   ( runApp
@@ -16,6 +17,8 @@ import           Network.HTTP.Types                 (Status, hContentType,
                                                      status200, status400,
                                                      status404, status500)
 
+import           Data.Bifunctor                     (first)
+
 import qualified Data.ByteString.Lazy               as LBS
 
 import           Data.Either                        (either)
@@ -31,9 +34,13 @@ import qualified Data.Aeson                         as A
 
 import qualified FirstApp.Conf                      as Conf
 import qualified FirstApp.DB                        as DB
-import           FirstApp.Types                     (Conf, ContentType (..),
+import           FirstApp.Types                     (Conf (confDBFilePath),
+                                                     ConfigError,
+                                                     ContentType (..),
                                                      Error (..),
                                                      RqType (AddRq, ListRq, ViewRq),
+                                                     confPortToWai,
+                                                     getDBFilePath,
                                                      mkCommentText, mkTopic,
                                                      renderContentType)
 
@@ -42,6 +49,7 @@ import           FirstApp.Types                     (Conf, ContentType (..),
 -- single type so that we can deal with the entire start-up process as a whole.
 data StartUpError
   = DbInitErr SQLiteResponse
+  | ConfigErr ConfigError
   deriving Show
 
 runApp :: IO ()
@@ -50,8 +58,8 @@ runApp = do
   cfgE <- prepareAppReqs
   -- Loading the configuration can fail, so we have to take that into account now.
   case cfgE of
-    Left err   -> undefined
-    Right _cfg -> run undefined undefined
+    Left err         -> putStrLn $ "Error loading config" <> show err
+    Right (conf, db) -> run (confPortToWai conf) (app conf db)
 
 -- We need to complete the following steps to prepare our app requirements:
 --
@@ -63,8 +71,14 @@ runApp = do
 --
 prepareAppReqs
   :: IO ( Either StartUpError ( Conf, DB.FirstAppDB ) )
-prepareAppReqs =
-  error "copy your prepareAppReqs from the previous level."
+prepareAppReqs = do
+  let readDBConf :: Conf -> FilePath
+      readDBConf = getDBFilePath . confDBFilePath
+  errOrConf <- first ConfigErr <$> Conf.parseOptions "appconfig.json"
+  errOrDB <- case errOrConf of
+    Left e     -> return $ Left e
+    Right conf -> first DbInitErr <$> DB.initDB (readDBConf conf)
+  return $ (,) <$> errOrConf <*> errOrDB
 
 -- | Some helper functions to make our lives a little more DRY.
 mkResponse

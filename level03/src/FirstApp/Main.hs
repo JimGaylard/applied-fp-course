@@ -71,7 +71,7 @@ handleRequest
   :: RqType
   -> Either Error Response
 handleRequest (AddRq _ _) =
-  Right $ resp200 PlainText "Hello there!"
+  Right $ resp200 PlainText "Add Request not implemented"
 handleRequest (ViewRq _) =
   Right $ resp200 PlainText "View Request not implemented"
 handleRequest ListRq =
