@@ -53,45 +53,59 @@ runAppM
   :: AppM a
   -> Env
   -> IO a
-runAppM =
-  error "runAppM not implemented"
+runAppM (AppM f) =
+  f
 
 instance Functor AppM where
   fmap :: (a -> b) -> AppM a -> AppM b
-  fmap = error "fmap for AppM not implemented"
+  fmap f ama =
+    AppM (fmap f . runAppM ama)
 
 instance Applicative AppM where
   pure :: a -> AppM a
-  pure = error "pure for AppM not implemented"
+  pure a = AppM (\_ -> pure a)
 
   (<*>) :: AppM (a -> b) -> AppM a -> AppM b
-  (<*>) = error "spaceship for AppM not implemented"
+  -- Applicative f => f (a -> b) -> f a -> f b
+  -- AppM (a -> b) :: Env -> IO (a -> b)
+  -- AppM a :: Env -> IO a - so we can <*> the IO instances
+  (<*>) amFab ama = AppM (\e -> runAppM amFab e <*> runAppM ama e)
 
 instance Monad AppM where
   return :: a -> AppM a
-  return = error "return for AppM not implemented"
+  return = pure
 
   -- When it comes to running functions in AppM as a Monad, this will take care
   -- of passing the Env from one function to the next.
   (>>=) :: AppM a -> (a -> AppM b) -> AppM b
-  (>>=) = error "bind for AppM not implemented"
+  -- Monad m => m a -> (a -> m b) -> m b
+  -- AppM a :: Env -> IO a
+  -- (a -> AppM b) :: a -> (Env -> IO b)
+  -- AppM b :: Env -> IO b
+  (>>=) ama aToMb = AppM (\e ->
+     runAppM ama e >>= (\a ->
+       runAppM (aToMb a) e))
 
 instance MonadReader Env AppM where
   -- Return the current Env from the AppM.
   ask :: AppM Env
-  ask = error "ask for AppM not implemented"
+  ask = AppM (\e -> pure e)
 
   -- Run a AppM inside of the current one using a modified Env value.
   local :: (Env -> Env) -> AppM a -> AppM a
-  local = error "local for AppM not implemented"
+  -- f :: (Env -> Env)
+  -- AppM a :: (Env -> IO a)
+  local f ama = AppM (runAppM ama . f)
+  -- local f ama = AppM (\e -> runAppM ama (f e))
 
   -- This will run a function on the current Env and return the result.
   reader :: (Env -> a) -> AppM a
-  reader = error "reader for AppM not implemented"
+  -- AppM a :: (Env -> IO a)
+  reader f = AppM (pure . f)
 
 instance MonadIO AppM where
   -- Take a type of 'IO a' and lift it into our AppM.
   liftIO :: IO a -> AppM a
-  liftIO = error "liftIO for AppM not implemented"
+  liftIO ioOfa = AppM (const ioOfa)
 
 -- Move on to ``src/FirstApp/DB.hs`` after this

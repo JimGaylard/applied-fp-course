@@ -9,28 +9,29 @@ module FirstApp.DB
   , deleteTopic
   ) where
 
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (asks)
+import           Control.Monad.IO.Class             (liftIO)
+import           Control.Monad.Reader               (ask)
 
-import Data.Bifunctor (first)
+import           Data.Bifunctor                     (first)
 import           Data.Text                          (Text)
 import qualified Data.Text                          as Text
 
 import           Data.Time                          (getCurrentTime)
 
-import           Database.SQLite.Simple             (Connection, FromRow, ToRow,
-                                                     Query (fromQuery))
+import           Database.SQLite.Simple             (Connection, FromRow,
+                                                     Query (fromQuery), ToRow)
 import qualified Database.SQLite.Simple             as Sql
 
 import qualified Database.SQLite.SimpleErrors       as Sql
 import           Database.SQLite.SimpleErrors.Types (SQLiteResponse)
 
-import FirstApp.AppM (AppM, Env (envDB))
+import           FirstApp.AppM                      (AppM, Env (envDB))
 
-import           FirstApp.Types                     (FirstAppDB (FirstAppDB, dbConn), Comment, CommentText,
+import           FirstApp.Types                     (Comment, CommentText,
                                                      DBFilePath (getDBFilePath),
-                                                     Error (DBError), Topic,
-                                                     fromDbComment,
+                                                     Error (DBError),
+                                                     FirstAppDB (FirstAppDB, dbConn),
+                                                     Topic, fromDbComment,
                                                      getCommentText, getTopic,
                                                      mkTopic)
 
@@ -61,36 +62,47 @@ initDB fp = Sql.runDBAction $ do
 
 getDBConn
   :: AppM Connection
-getDBConn =
-  error "getDBConn not implemented"
+  -- :: AppM (Env -> IO Connection)
+getDBConn = do
+  env <- ask
+  return $ dbConn $ envDB env
 
 runDB
   :: (a -> Either Error b)
   -> (Connection -> IO a)
   -> AppM (Either Error b)
-runDB =
-  error "runDB not re-implemented"
+runDB f action = do
+  conn <- getDBConn
+  r <- liftIO $ Sql.runDBAction $ action conn
+  return $ either (Left . DBError) f r
 
 getComments
   :: Topic
   -> AppM (Either Error [Comment])
-getComments =
-  error "Copy your completed 'getComments' and refactor to match the new type signature"
+getComments t = do
+  let q = "SELECT id,topic,comment,time FROM comments WHERE topic = ?"
+  runDB (traverse fromDbComment) (\conn -> Sql.query conn q [ getTopic t ])
 
 addCommentToTopic
   :: Topic
   -> CommentText
   -> AppM (Either Error ())
-addCommentToTopic =
-  error "Copy your completed 'appCommentToTopic' and refactor to match the new type signature"
+addCommentToTopic t ct = do
+  nowish <- liftIO getCurrentTime
+  let q = "INSERT INTO comments (topic,comment,time) VALUES (?,?,?)"
+  runDB Right (\conn -> Sql.execute conn q (getTopic t, getCommentText ct, nowish))
 
 getTopics
   :: AppM (Either Error [Topic])
 getTopics =
-  error "Copy your completed 'getTopics' and refactor to match the new type signature"
+  let q = "SELECT DISTINCT topic FROM comments"
+  in
+    runDB (traverse ( mkTopic . Sql.fromOnly )) (\conn -> Sql.query_ conn q)
 
 deleteTopic
   :: Topic
   -> AppM (Either Error ())
-deleteTopic =
-  error "Copy your completed 'deleteTopic' and refactor to match the new type signature"
+deleteTopic t =
+  let q = "DELETE FROM comments WHERE topic = ?"
+  in
+    runDB Right (\conn -> Sql.execute conn q [getTopic t])
