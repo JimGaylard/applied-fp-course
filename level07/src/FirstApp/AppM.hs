@@ -1,9 +1,11 @@
+{-# LANGUAGE DeriveFunctor         #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE InstanceSigs          #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE DeriveFunctor #-}
 module FirstApp.AppM where
 
+import           Control.Applicative    (liftA2)
 import           Control.Monad.Except   (MonadError (..))
 import           Control.Monad.IO.Class (MonadIO (..))
 import           Control.Monad.Reader   (MonadReader (..))
@@ -71,38 +73,54 @@ runAppM (AppM m) =
 
 instance Applicative AppM where
   pure :: a -> AppM a
-  pure  = error "pure for AppM not implemented"
+  pure a = AppM (\_ -> (pure . pure) a)
 
   (<*>) :: AppM (a -> b) -> AppM a -> AppM b
-  (<*>) = error "ap for AppM not implemented"
+  -- Applicative f => f (a -> b) -> f a -> f b
+  -- AppM (a -> b) :: Env -> IO (Either Error (a -> b))
+  -- AppM a :: Env -> IO (Either Error a) - so we can <*> the IO instances
+  -- IO (Either Error (a-b))
+  (<*>) amFab ama = AppM (\e -> liftA2 (<*>) (runAppM amFab e) (runAppM ama e))
 
 instance Monad AppM where
   return :: a -> AppM a
-  return = error "return for AppM not implemented"
+  return = pure
 
   (>>=) :: AppM a -> (a -> AppM b) -> AppM b
-  (>>=)  = error "bind for AppM not implemented"
+  -- (Env -> IO (Either Error a)) -> (a -> (Env -> IO (Either Error b))) -> (Env -> IO (Either Error b))
+  (>>=)  ama atMofB = AppM (\e -> do
+    errOra <- runAppM ama e
+    case errOra of
+      Left err -> pure $ Left err
+      Right a  -> runAppM (atMofB a) e)
 
 instance MonadIO AppM where
   liftIO :: IO a -> AppM a
-  liftIO = error "liftIO for AppM not implemented"
+  liftIO ioOfa = AppM (\_e -> Right <$> ioOfa)
 
 instance MonadReader Env AppM where
   ask :: AppM Env
-  ask = error "ask for AppM not implemented"
+  -- :: IO (Either Error Env)
+  ask = AppM (pure . Right)
 
   local :: (Env -> Env) -> AppM a -> AppM a
-  local = error "local for AppM not implemented"
+  local f ama = AppM (runAppM ama . f)
 
   reader :: (Env -> a) -> AppM a
-  reader = error "reader for AppM not implemented"
+  reader f = AppM (pure . Right . f)
 
 instance MonadError Error AppM where
   throwError :: Error -> AppM a
-  throwError = error "throwError for AppM not implemented"
+  -- :: Error -> (Env -> IO (Either Error a))
+  throwError e = AppM (\_ -> (pure . Left) e)
 
   catchError :: AppM a -> (Error -> AppM a) -> AppM a
-  catchError = error "catchError for AppM not implemented"
+  catchError ama f = AppM (\env -> do
+    errOra <- runAppM ama env
+    case errOra of
+      Left err -> runAppM (f err) env
+      Right a  -> pure $ Right a)
+
 
 -- This is a helper function that will `lift` an Either value into our new AppM
 -- by applying `throwError` to the Left value, and using `pure` to lift the
@@ -114,5 +132,6 @@ instance MonadError Error AppM where
 liftEither
   :: Either Error a
   -> AppM a
-liftEither =
-  error "throwLeft not implemented"
+liftEither errOra = case errOra of
+  Left e  -> throwError e
+  Right a -> pure a

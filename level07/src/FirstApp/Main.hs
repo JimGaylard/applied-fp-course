@@ -43,7 +43,7 @@ import           FirstApp.Types                     (Conf (..),
 
 import           FirstApp.AppM                      (AppM,
                                                      Env (Env, envConfig, envDB),
-                                                     runAppM, liftEither)
+                                                     liftEither, runAppM)
 
 -- Our start-up process is becoming more complicated and could fail in new and
 -- interesting ways. But we also want to be able to capture these errors in a
@@ -74,19 +74,24 @@ runApp = do
 -- Either value.
 prepareAppReqs
   :: IO (Either StartUpError Env)
-prepareAppReqs =
-  error "Copy your completed 'prepareAppReqs' and refactor to match the new type signature"
+prepareAppReqs = do
+  errOrConf <- runExceptT initConf
+  case errOrConf of
+    Left e  -> logToErr $ "Error retrieving config" <> show e
+    Right a -> a
+  x <- runExceptT $ initDB errOrConf
+  case x of
+    Left e  -> logToErr e
+    Right a -> pure a
+  return x
   where
     logToErr :: Text -> AppM ()
     logToErr = liftIO . hPutStrLn stderr
 
     toStartUpErr :: (a -> StartUpError) -> IO (Either a c) -> ExceptT StartUpError IO c
-    toStartUpErr = error "toStartUpErr not reimplemented"
+    toStartUpErr f i =
+      ExceptT $ (fmap . first) f i
 
-    -- Take our possibly failing configuration/db functions with their unique
-    -- error types and turn them into a consistently typed ExceptT. We can then
-    -- use them in a `do` block as if the Either isn't there. Extracting the
-    -- final result before returning.
     initConf :: ExceptT StartUpError IO Conf
     initConf = toStartUpErr ConfErr $ Conf.parseOptions "appconfig.json"
 
