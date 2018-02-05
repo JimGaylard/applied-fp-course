@@ -6,8 +6,9 @@ module FirstApp.Main
   ) where
 
 import           Control.Monad.Except               (ExceptT (ExceptT),
-                                                     runExceptT)
+                                                     join, runExceptT)
 import           Control.Monad.IO.Class             (liftIO)
+import           Data.Monoid                        ((<>))
 
 import           Network.Wai                        (Application, Request,
                                                      Response, pathInfo,
@@ -74,19 +75,16 @@ runApp = do
 -- Either value.
 prepareAppReqs
   :: IO (Either StartUpError Env)
-prepareAppReqs = do
-  errOrConf <- runExceptT initConf
-  case errOrConf of
-    Left e  -> logToErr $ "Error retrieving config" <> show e
-    Right a -> a
-  x <- runExceptT $ initDB errOrConf
-  case x of
-    Left e  -> logToErr e
-    Right a -> pure a
-  return x
+prepareAppReqs = runExceptT $ do
+  cfgE <- initConf
+  dbE <- initDB cfgE
+  return $ Env logToErr cfgE dbE
+  -- Wrap our values (if we have them) in our Env for use in other parts of our
+  -- application. We do it this way so we can have access to the bits we need
+  -- when starting up the full app or one for testing.
   where
     logToErr :: Text -> AppM ()
-    logToErr = liftIO . hPutStrLn stderr
+    logToErr = liftIO . (hPutStrLn stderr)
 
     toStartUpErr :: (a -> StartUpError) -> IO (Either a c) -> ExceptT StartUpError IO c
     toStartUpErr f i =
